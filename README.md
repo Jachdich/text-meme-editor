@@ -8,6 +8,8 @@ Use [tiv](https://github.com/stefanhaustein/TerminalImageViewer) to convert a me
 
  - Tab switches between image focus and colour palette focus
  - Ctrl+e switches between image focus and character sheet focus
+ - Ctrl+s to save
+ - Ctrl+c to quit (doesn't save or prompt to save)
  - In image focus:
     - current tool displayed at top left
     - pen down status is displayed below current tool
