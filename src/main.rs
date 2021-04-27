@@ -184,7 +184,8 @@ fn draw_colour_select<W: Write>(
 		x: u16, y: u16,
 		tool_cur_x: u16, tool_cur_y: u16,
 		colours: &Vec<RGB>, 
-		curr_fg: RGB, curr_bg: RGB) {
+		curr_fg: RGB, curr_bg: RGB,
+		fg_string: &str, bg_string: &str) {
     for row in 0..4 as usize {
        	write!(screen, "{}{}{}█{}█{}█{}█", 
 			termion::cursor::Goto(x, row as u16 + y),
@@ -207,11 +208,11 @@ fn draw_colour_select<W: Write>(
 		termion::cursor::Goto(x, y + 4),
 		curr_fg.to_bg(),
 		curr_fg.get_inverted().to_fg(),
-		curr_fg.to_html_string(),
+		fg_string,
 		termion::cursor::Goto(x, y + 5),
 		curr_bg.to_bg(),
 		curr_bg.get_inverted().to_fg(),
-		curr_bg.to_html_string(),
+		bg_string,
 	).unwrap();
 }
 
@@ -262,6 +263,11 @@ fn main() {
     
     let mut curr_fg = RGB::new(0, 0, 0);
     let mut curr_bg = RGB::new(255, 255, 255);
+
+    let mut inp_fg = 0;
+    let mut inp_bg = 0;
+    let mut inp_buffer = "".to_string();
+    
 //	println!("{:?}", data);
 	write!(screen, "{}{}", termion::cursor::Hide, termion::clear::All).unwrap();
 
@@ -320,6 +326,50 @@ fn main() {
 				Event::Key(Key::Ctrl('d')) => {
     				curr_bg.default = !curr_bg.default;
     			},
+                Event::Key(Key::Char('#')) => {
+                    if inp_fg == 0 && inp_bg == 0 {
+                        inp_buffer = curr_fg.to_html_string();
+                        inp_fg = 1;
+                    }
+                },
+                Event::Key(Key::Ctrl('#')) => {
+                    if inp_fg == 0 && inp_bg == 0 {
+                        inp_buffer = curr_bg.to_html_string();
+                        inp_bg = 1;
+                    }
+                },
+                Event::Key(Key::Char(c)) => {
+                    if inp_fg != 0 || inp_bg != 0 {
+                        //fucking stupid hack to get around the
+                        //lack of ability to set a char in a string in rust
+                        let mut res = String::with_capacity(inp_buffer.len());
+                        let mut idx = 0;
+                        for ch in inp_buffer.chars() {
+                            //evil hack because one of these will (hopefully) always be zero
+                            if idx == (inp_fg + inp_bg) {
+                                res.push(c);
+                            } else {
+                                res.push(ch);
+                            }
+                            idx += 1;
+                        }
+                        inp_buffer = res;
+                    }
+                    if inp_fg != 0 {
+                        inp_fg += 1;
+                        if inp_fg > 6 {
+                            inp_fg = 0;
+                            curr_fg = RGB::from_html(u32::from_str_radix(inp_buffer.trim_start_matches("#"), 16).unwrap());
+                        }
+                    }
+                    if inp_bg != 0 {
+                        inp_bg += 1;
+                        if inp_bg > 6 {
+                            inp_bg = 0;
+                            curr_bg = RGB::from_html(u32::from_str_radix(inp_buffer.trim_start_matches("#"), 16).unwrap());
+                        }
+                    }
+                },
     			_ => ()
 			}
 			if tool_cur_x < 1 { tool_cur_x = 1; }
@@ -369,6 +419,10 @@ fn main() {
            			Event::Key(Key::Char('o')) => {
            			    tool = Tool::Paint;
            			}
+           			Event::Key(Key::Char('g')) => {
+                        curr_fg = data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].fg;
+                        curr_bg = data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].bg;
+           			}
            			_ => (),
        			}
 			}
@@ -415,7 +469,6 @@ fn main() {
 		} else {
 			cur_bg = termion::color::Bg(termion::color::Rgb(0, 0, 0));
 			cur_fg = termion::color::Fg(termion::color::Rgb(255, 255, 255));
-			
 		}
 
 
@@ -439,7 +492,14 @@ fn main() {
             tool_down,
         ).unwrap();
 
-        draw_colour_select(&mut screen, width + 1, 3, tool_cur_x, tool_cur_y, &colours, curr_fg, curr_bg);
+        let fg_string: String;
+        let bg_string: String;
+        if inp_fg != 0 { fg_string = inp_buffer.clone();
+        } else { fg_string = curr_fg.to_html_string(); }
+        if inp_bg != 0 { bg_string = inp_buffer.clone();
+        } else { bg_string = curr_bg.to_html_string(); }
+        
+        draw_colour_select(&mut screen, width + 1, 3, tool_cur_x, tool_cur_y, &colours, curr_fg, curr_bg, &fg_string, &bg_string);
 
 		let mut x: u16 = 0;
 		let mut y: u16 = 0;
