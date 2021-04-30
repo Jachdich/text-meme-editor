@@ -26,8 +26,8 @@ Use [tiv](https://github.com/stefanhaustein/TerminalImageViewer) to convert a me
     - arrow keys to navigate
     - r to toggle foreground default mode (does not change existing char colour)
     - shift+r to toggle background default mode
-    - # to enter a custom hex value for the foreground colour
-    - shift+# to enter a custom hex value for the backgroubnd colour
+    - \# to enter a custom hex value for the foreground colour
+    - shift+\# to enter a custom hex value for the backgroubnd colour
  - In character sheet focus:
     - arrows to select character to use for the pen
     - Ctrl+e to switch back
