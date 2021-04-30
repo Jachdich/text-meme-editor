@@ -2,7 +2,7 @@
 
 Note: this is highly unstable. It reads and writes to `mem1.txt` only currently.
 
-Use [tiv](https://github.com/stefanhaustein/TerminalImageViewer) to convert a meme template to a .txt file. Then make sure you have rust and cargo installed, and run `cargo run` in this directory. It doesnt render the screen 'till you press a key.
+Use [tiv](https://github.com/stefanhaustein/TerminalImageViewer) to convert a meme template to a .txt file. Then make sure you have rust and cargo installed, and run `cargo run --release` in this directory. It doesnt render the screen 'till you press a key.
 
 # Controls
 
