@@ -234,12 +234,12 @@ fn make_char_sheet(txt: String) -> Vec<Vec<char>> {
 }
 
 fn main() {
-	let stdout = stdout().into_raw_mode().unwrap();
-	let screen = termion::screen::AlternateScreen::from(stdout).into_raw_mode().unwrap();
-	let mut screen = termion::input::MouseTerminal::from(screen).into_raw_mode().unwrap();
-	let contents =       std::fs::read_to_string("mem1.txt").unwrap();
+	let stdout         = stdout().into_raw_mode().unwrap();
+	let screen         = termion::screen::AlternateScreen::from(stdout).into_raw_mode().unwrap();
+	let mut screen     = termion::input::MouseTerminal::from(screen).into_raw_mode().unwrap();
+	let contents       = std::fs::read_to_string("mem1.txt").unwrap();
 	let char_sheet_txt = std::fs::read_to_string("character_sheet.txt").unwrap();
-	let char_sheet = make_char_sheet(char_sheet_txt);
+	let char_sheet     = make_char_sheet(char_sheet_txt);
 	
 	let colours = [0xffffff, 0xffff01, 0xff6600, 0xde0000,
 			       0xff0198, 0x330099, 0x0001cd, 0x0098fe,
@@ -320,10 +320,10 @@ fn main() {
     			Event::Key(Key::Backspace) => {
     				curr_bg = colours[((tool_cur_y - 1) * 4 + (tool_cur_x - 1)) as usize];
     			},
-    			Event::Key(Key::Char('d')) => {
+    			Event::Key(Key::Char('r')) => {
     				curr_fg.default = !curr_fg.default;
     			},
-				Event::Key(Key::Ctrl('d')) => {
+				Event::Key(Key::Char('R')) => {
     				curr_bg.default = !curr_bg.default;
     			},
                 Event::Key(Key::Char('#')) => {
@@ -332,41 +332,43 @@ fn main() {
                         inp_fg = 1;
                     }
                 },
-                Event::Key(Key::Ctrl('#')) => {
+                Event::Key(Key::Char('~')) => {
                     if inp_fg == 0 && inp_bg == 0 {
                         inp_buffer = curr_bg.to_html_string();
                         inp_bg = 1;
                     }
                 },
                 Event::Key(Key::Char(c)) => {
-                    if inp_fg != 0 || inp_bg != 0 {
-                        //fucking stupid hack to get around the
-                        //lack of ability to set a char in a string in rust
-                        let mut res = String::with_capacity(inp_buffer.len());
-                        let mut idx = 0;
-                        for ch in inp_buffer.chars() {
-                            //evil hack because one of these will (hopefully) always be zero
-                            if idx == (inp_fg + inp_bg) {
-                                res.push(c);
-                            } else {
-                                res.push(ch);
+                    if c.is_digit(16) {
+                        if inp_fg != 0 || inp_bg != 0 {
+                            //fucking stupid hack to get around the
+                            //lack of ability to set a char in a string in rust
+                            let mut res = String::with_capacity(inp_buffer.len());
+                            let mut idx = 0;
+                            for ch in inp_buffer.chars() {
+                                //evil hack because one of these will (hopefully) always be zero
+                                if idx == (inp_fg + inp_bg) {
+                                    res.push(c);
+                                } else {
+                                    res.push(ch);
+                                }
+                                idx += 1;
                             }
-                            idx += 1;
+                            inp_buffer = res;
                         }
-                        inp_buffer = res;
-                    }
-                    if inp_fg != 0 {
-                        inp_fg += 1;
-                        if inp_fg > 6 {
-                            inp_fg = 0;
-                            curr_fg = RGB::from_html(u32::from_str_radix(inp_buffer.trim_start_matches("#"), 16).unwrap());
+                        if inp_fg != 0 {
+                            inp_fg += 1;
+                            if inp_fg > 6 {
+                                inp_fg = 0;
+                                curr_fg = RGB::from_html(u32::from_str_radix(inp_buffer.trim_start_matches("#"), 16).unwrap());
+                            }
                         }
-                    }
-                    if inp_bg != 0 {
-                        inp_bg += 1;
-                        if inp_bg > 6 {
-                            inp_bg = 0;
-                            curr_bg = RGB::from_html(u32::from_str_radix(inp_buffer.trim_start_matches("#"), 16).unwrap());
+                        if inp_bg != 0 {
+                            inp_bg += 1;
+                            if inp_bg > 6 {
+                                inp_bg = 0;
+                                curr_bg = RGB::from_html(u32::from_str_radix(inp_buffer.trim_start_matches("#"), 16).unwrap());
+                            }
                         }
                     }
                 },
@@ -423,6 +425,11 @@ fn main() {
                         curr_fg = data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].fg;
                         curr_bg = data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].bg;
            			}
+                    Event::Key(Key::Char('h')) => {
+                        curr_fg  = data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].fg;
+                        curr_bg  = data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].bg;
+                        pen_char = data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].ch;
+           			}
            			_ => (),
        			}
 			}
@@ -472,7 +479,7 @@ fn main() {
 		}
 
 
-		write!(screen, "{}{}{}{}{}{}{}{}{}",
+		write!(screen, "{}{}{}{}{}{}{}{}{}{}{}{:?}{}{}",
 			termion::color::Bg(termion::color::Reset),
 			termion::clear::All,
 			termion::cursor::Goto(1, 1),
@@ -481,10 +488,7 @@ fn main() {
 			cur_fg,
 			cur_bg,
 			data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].ch,
-			termion::cursor::Goto(img_cur_x, img_cur_y)
-		).unwrap();
-
-        write!(screen, "{}{}{:?}{}{}",
+			termion::cursor::Goto(img_cur_x, img_cur_y),
         	termion::color::Bg(termion::color::Reset),
             termion::cursor::Goto(width + 1, 1),
             tool,
