@@ -52,6 +52,12 @@ impl RGB {
     }
 }
 
+impl std::cmp::PartialEq for RGB {
+    fn eq(&self, other: &Self) -> bool {
+        self.r == other.r && self.g == other.g && self.b == other.b
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 struct FmtChar {
 	ch: char,
@@ -72,21 +78,6 @@ fn read_until(ch: char, data: &Vec<char>, mut pos: usize) -> (Vec<char>, usize) 
     } 
     (data[start..pos].to_vec(), pos)
 }
-/*    
-fn is_24bit(data: &Vec<char>) -> bool {
-    let mut pos = 0;
-    while data[pos] != '\u{001b}' &&
-    	   pos < data.len() - 7 &&
-    	   data[pos + 1] != '[' {
-    	pos += 1;
-    }
-    if pos == data.len() - 8 { return false; }
-    let (_first_num, pos)  = read_until(';', data, pos + 2);
-    let (second_num, _pos) = read_until(';', data, pos + 1);
-    if second_num[0] == '2' { return true; }
-    if second_num[0] == '5' { return false; }
-    return false;
-}*/
 
 fn make_data(data: Vec<char>) -> Vec<Vec<FmtChar>> {
     let mut out: Vec<FmtChar> = Vec::new();
@@ -153,10 +144,18 @@ fn make_data(data: Vec<char>) -> Vec<Vec<FmtChar>> {
 
 fn construct_buffer(data: &Vec<Vec<FmtChar>>) -> String {
 	let mut buffer = "".to_string();
+	let mut last_fg = RGB::new(0, 0, 0);
+	let mut last_bg = RGB::new(0, 0, 0);
 	for e in data {
 		for ch in e {
-			buffer.push_str(&termion::color::Fg(termion::color::Rgb(ch.fg.r, ch.fg.g, ch.fg.b)).to_string());
-			buffer.push_str(&termion::color::Bg(termion::color::Rgb(ch.bg.r, ch.bg.g, ch.bg.b)).to_string());
+		    if last_fg != ch.fg {
+			    buffer.push_str(&termion::color::Fg(termion::color::Rgb(ch.fg.r, ch.fg.g, ch.fg.b)).to_string());
+			    last_fg = ch.fg;
+			}
+			if last_bg != ch.bg {
+			    buffer.push_str(&termion::color::Bg(termion::color::Rgb(ch.bg.r, ch.bg.g, ch.bg.b)).to_string());
+			    last_bg = ch.bg;
+			}
 			buffer.push(ch.ch);
 		}
 		buffer.push_str(&format!("{}{}\r\n", termion::color::Fg(termion::color::Reset), termion::color::Bg(termion::color::Reset)));
@@ -179,32 +178,30 @@ enum Tool {
     Text
 }
 
-fn draw_colour_select<W: Write>(
-		screen: &mut termion::input::MouseTerminal<W>,
+fn draw_colour_select(
 		x: u16, y: u16,
 		tool_cur_x: u16, tool_cur_y: u16,
 		colours: &Vec<RGB>, 
 		curr_fg: RGB, curr_bg: RGB,
-		fg_string: &str, bg_string: &str) {
+		fg_string: &str, bg_string: &str) -> String {
+
+	let mut render = "".to_string();
     for row in 0..4 as usize {
-       	write!(screen, "{}{}{}█{}█{}█{}█", 
+       	render.push_str(&format!("{}{}{}█{}█{}█{}█", 
 			termion::cursor::Goto(x, row as u16 + y),
 			termion::color::Bg(termion::color::Reset),
 			colours[row * 4 + 0].to_fg(),
 			colours[row * 4 + 1].to_fg(),
 			colours[row * 4 + 2].to_fg(),
 			colours[row * 4 + 3].to_fg(),
-       	).unwrap();
+       	));
     }
 
 	let sel = colours[((tool_cur_y - 1) * 4 + (tool_cur_x - 1)) as usize];
-	write!(screen, "{}{}{}╳", 
-		termion::cursor::Goto((tool_cur_x - 1) + x, (tool_cur_y - 1) + y),
-		sel.get_inverted().to_fg(),
-		sel.to_bg(),
-	).unwrap();
-
-	write!(screen, "{}{}{}{}{}{}{}{}",
+	render.push_str(&format!("{}{}{}╳{}{}{}{}{}{}{}{}",
+    	termion::cursor::Goto((tool_cur_x - 1) + x, (tool_cur_y - 1) + y),
+        sel.get_inverted().to_fg(),
+        sel.to_bg(),
 		termion::cursor::Goto(x, y + 4),
 		curr_fg.to_bg(),
 		curr_fg.get_inverted().to_fg(),
@@ -213,7 +210,8 @@ fn draw_colour_select<W: Write>(
 		curr_bg.to_bg(),
 		curr_bg.get_inverted().to_fg(),
 		bg_string,
-	).unwrap();
+	));
+	render
 }
 
 fn make_char_sheet(txt: String) -> Vec<Vec<char>> {
@@ -231,6 +229,24 @@ fn make_char_sheet(txt: String) -> Vec<Vec<char>> {
 		ret.pop();
 	}
 	ret
+}
+
+fn draw_char_sheet(char_sheet: &Vec<Vec<char>>, width: u16) -> String {
+    let mut x: u16 = 0;
+    let mut y: u16 = 0;
+    let mut chsheet_render = format!("{}{}",
+        termion::color::Fg(termion::color::Reset),
+        termion::color::Bg(termion::color::Reset));
+    for line in char_sheet {
+        for ch in line {
+            chsheet_render.push_str(&format!("{}{}",
+            	termion::cursor::Goto(width + 9 + x, y + 2), ch));
+            x += 2;
+        }
+        y += 2;
+        x = 0;
+    }
+    chsheet_render
 }
 
 fn main() {
@@ -268,13 +284,9 @@ fn main() {
     let mut inp_bg = 0;
     let mut inp_buffer = "".to_string();
     
-//	println!("{:?}", data);
 	write!(screen, "{}{}", termion::cursor::Hide, termion::clear::All).unwrap();
 
 	let mut curr_buffer: String = construct_buffer(&data);
-
-	//let mut image_shown = true;
-	//let mut chars_shown = false;
 
     let mut pen_char: char = '█';
 
@@ -477,11 +489,20 @@ fn main() {
 			cur_bg = termion::color::Bg(termion::color::Rgb(0, 0, 0));
 			cur_fg = termion::color::Fg(termion::color::Rgb(255, 255, 255));
 		}
+        let fg_string: String;
+        let bg_string: String;
+        if inp_fg != 0 { fg_string = inp_buffer.clone();
+        } else { fg_string = curr_fg.to_html_string(); }
+        if inp_bg != 0 { bg_string = inp_buffer.clone();
+        } else { bg_string = curr_bg.to_html_string(); }
+        
+        let colour_select  = draw_colour_select(width + 1, 3, tool_cur_x, tool_cur_y, &colours, curr_fg, curr_bg, &fg_string, &bg_string);
+        let chsheet_render = draw_char_sheet(&char_sheet, width);
 
-
-		write!(screen, "{}{}{}{}{}{}{}{}{}{}{}{:?}{}{}",
+		write!(screen, "{}{}{}{}{}{}{}{}{}{}{}{}{:?}{}{}{}{}╭─╮{}│{}│{}╰─╯",
 			termion::color::Bg(termion::color::Reset),
 			termion::clear::All,
+		    colour_select,
 			termion::cursor::Goto(1, 1),
 			curr_buffer,
 			termion::cursor::Goto(img_cur_x, img_cur_y),
@@ -494,33 +515,7 @@ fn main() {
             tool,
             termion::cursor::Goto(width + 1, 2),
             tool_down,
-        ).unwrap();
-
-        let fg_string: String;
-        let bg_string: String;
-        if inp_fg != 0 { fg_string = inp_buffer.clone();
-        } else { fg_string = curr_fg.to_html_string(); }
-        if inp_bg != 0 { bg_string = inp_buffer.clone();
-        } else { bg_string = curr_bg.to_html_string(); }
-        
-        draw_colour_select(&mut screen, width + 1, 3, tool_cur_x, tool_cur_y, &colours, curr_fg, curr_bg, &fg_string, &bg_string);
-
-		let mut x: u16 = 0;
-		let mut y: u16 = 0;
-		for line in &char_sheet {
-			for ch in line {
-				write!(screen, "{}{}{}{}",
-					termion::cursor::Goto(width + 9 + x, y + 2),
-					termion::color::Fg(termion::color::Reset),
-					termion::color::Bg(termion::color::Reset),
-					ch).unwrap();
-				x += 2;
-			}
-			y += 2;
-			x = 0;
-		}
-
-		write!(screen, "{}╭─╮{}│{}│{}╰─╯",
+		    chsheet_render,
 			termion::cursor::Goto(width + 9 + (char_cur_x - 1) * 2 - 1, 2 + (char_cur_y - 1) * 2 - 1),
 			termion::cursor::Goto(width + 9 + (char_cur_x - 1) * 2 - 1, 2 + (char_cur_y - 1) * 2),
 			termion::cursor::Goto(width + 9 + (char_cur_x - 1) * 2 + 1, 2 + (char_cur_y - 1) * 2),
