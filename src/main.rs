@@ -5,168 +5,17 @@ use termion::event::{Key, Event};
 use std::io::{Write, stdout, stdin};
 use crate::termion::input::TermRead;
 
-#[derive(Copy, Clone, Debug)]
-struct RGB {
-	r: u8,
-	g: u8,
-	b: u8,
-	default: bool,
-}
+mod rgb;
+mod parser;
+mod format_char;
+use format_char::FmtChar;
+use rgb::RGB;
 
-impl RGB {
-    fn new(r: u8, g: u8, b: u8) -> Self {
-        RGB {
-            r: r, g: g, b: b,
-            default: false
-        }
-    }
-    fn from_html(n: u32) -> Self {
-    	let r: u8 = ((n >> 16) & 0xFF) as u8;
-    	let g: u8 = ((n >> 8)  & 0xFF) as u8;
-    	let b: u8 = ((n >> 0)  & 0xFF) as u8;
-    	RGB {
-    		r:r, g:g, b:b, default:false
-    	}
-    }
-    fn to_fg(&self) -> termion::color::Fg<termion::color::Rgb> {
-    	return termion::color::Fg(termion::color::Rgb(self.r, self.g, self.b));
-    }
-    fn to_bg(&self) -> termion::color::Bg<termion::color::Rgb> {
-    	return termion::color::Bg(termion::color::Rgb(self.r, self.g, self.b));
-    }
-    fn get_inverted(&self) -> RGB {
-    	let txt_col: RGB;
-        if self.r as u16 + self.g as u16 + self.b as u16 > 384 {
-        	txt_col = RGB::new(0, 0, 0);
-        } else {
-        	txt_col = RGB::new(255, 255, 255);
-        }
-        return txt_col;
-    }
-
-    fn to_html_string(&self) -> String {
-    	if self.default {
-    		return "default".to_string();
-    	}
-    	format!("#{:02X?}{:02X?}{:02X?}", self.r, self.g, self.b)
-    }
-}
-
-impl std::cmp::PartialEq for RGB {
-    fn eq(&self, other: &Self) -> bool {
-        self.r == other.r && self.g == other.g && self.b == other.b
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-struct FmtChar {
-	ch: char,
-	fg: RGB,
-	bg: RGB,
-}
-
-fn read_until(ch: char, data: &Vec<char>, mut pos: usize) -> (Vec<char>, usize) {
-    if pos >= data.len() - 1 {
-        return (vec![], pos);
-    }
-    let start = pos;
-    while pos < data.len() && data[pos] != ch {
-    	pos += 1;
-    }
-    if pos >= data.len() - 1 {
-        return (data[start..pos].to_vec(), pos);
-    } 
-    (data[start..pos].to_vec(), pos)
-}
-
-fn make_data(data: Vec<char>) -> Vec<Vec<FmtChar>> {
-    let mut out: Vec<FmtChar> = Vec::new();
-    let mut pos = 0;
-    let mut bg = RGB::new(0, 0, 0);
-    let mut fg = RGB::new(255, 255, 255);
-
-    while pos < data.len() {
-        if data[pos] == '\u{001b}' {
-            pos += 2;
-            if data[pos..pos + 2].to_vec().into_iter().collect::<String>() == "0m" {
-                bg = RGB::new(0, 0, 0);
-                fg = RGB::new(255, 255, 255);
-                pos += 2;
-                continue;
-            }
-            if data[pos..pos + 3].to_vec().into_iter().collect::<String>() == "39m" {
-                bg = RGB::new(0, 0, 0);
-                fg = RGB::new(255, 255, 255);
-                pos += 3;
-                continue;
-            }
-            if data[pos..pos + 3].to_vec().into_iter().collect::<String>() == "49m" {
-                bg = RGB::new(0, 0, 0);
-                fg = RGB::new(255, 255, 255);
-                pos += 3;
-                continue;
-            }
-            let (first_num,   npos) = read_until(';', &data, pos); pos = npos;
-            let (_second_num, npos) = read_until(';', &data, pos + 1); pos = npos;
-
-            let (rv, npos) = read_until(';', &data, pos + 1); pos = npos;
-            let (gv, npos) = read_until(';', &data, pos + 1); pos = npos;
-            let (bv, npos) = read_until('m', &data, pos + 1); pos = npos;
-            let r = rv.into_iter().collect::<String>().parse::<u8>().unwrap();
-            let g = gv.into_iter().collect::<String>().parse::<u8>().unwrap();
-            let b = bv.into_iter().collect::<String>().parse::<u8>().unwrap();
-            pos += 1;
-            let s: String = first_num.into_iter().collect();
-            if s == "38" {
-                fg = RGB::new(r, g, b);
-            } else if s == "48" {
-                bg = RGB::new(r, g, b);
-            }
-        } else {
-            out.push(FmtChar{ch: data[pos], fg: fg, bg: bg});
-            pos += 1;
-        }
-    }
-    let mut n: Vec<Vec<FmtChar>> = Vec::new();
-    n.push(Vec::new());
-    for ch in out {
-    	if ch.ch == '\n' {
-    		n.push(Vec::new());
-    	} else {
-    		n.last_mut().unwrap().push(ch);
-    	}
-    }
-    if n.last().unwrap().len() == 0 {
-    	n.pop();
-    }
-    return n;
-}
-
-fn construct_buffer(data: &Vec<Vec<FmtChar>>) -> String {
-	let mut buffer = "".to_string();
-	let mut last_fg = RGB::new(0, 0, 0);
-	let mut last_bg = RGB::new(0, 0, 0);
-	for e in data {
-		for ch in e {
-		    if last_fg != ch.fg {
-			    buffer.push_str(&termion::color::Fg(termion::color::Rgb(ch.fg.r, ch.fg.g, ch.fg.b)).to_string());
-			    last_fg = ch.fg;
-			}
-			if last_bg != ch.bg {
-			    buffer.push_str(&termion::color::Bg(termion::color::Rgb(ch.bg.r, ch.bg.g, ch.bg.b)).to_string());
-			    last_bg = ch.bg;
-			}
-			buffer.push(ch.ch);
-		}
-		buffer.push_str(&format!("{}{}\r\n", termion::color::Fg(termion::color::Reset), termion::color::Bg(termion::color::Reset)));
-	}
-	buffer
-}
 
 #[derive(PartialEq)]
 enum Focus {
     Image,
-    Toolbox,
+    Colours,
     Charsheet,
 }
 
@@ -176,6 +25,212 @@ enum Tool {
     Pen,
     Paint,
     Text
+}
+
+struct ImageView {
+    data: Vec<Vec<FmtChar>>,
+    width: u16,
+    height: u16,
+    cur_x: u16,
+    cur_y: u16,
+    curr_buffer: String,
+    tool: Tool,
+    tool_down: bool,
+}
+
+struct ColoursView {
+    fg: RGB,
+    bg: RGB,
+    cur_x: u16,
+    cur_y: u16,
+    inp_fg: u8,
+    inp_bg: u8,
+    inp_buffer: String,
+    colours: Vec<RGB>,
+}
+
+impl ColoursView {
+    fn new() -> Self {
+        let colours = [0xffffff, 0xffff01, 0xff6600, 0xde0000,
+                       0xff0198, 0x330099, 0x0001cd, 0x0098fe,
+                       0x01ab02, 0x016701, 0x673301, 0x9a6634,
+                       0xbbbbbb, 0x888888, 0x444444, 0x000000].iter().map(|x| RGB::from_html(*x)).collect::<Vec<RGB>>();
+        ColoursView {
+            fg: RGB::new(0, 0, 0),
+            bg: RGB::new(255, 255, 255),
+            cur_x: 1,
+            cur_y: 1,
+            inp_fg: 0,
+            inp_bg: 0,
+            inp_buffer: "".to_string(),
+            colours
+        }
+    }
+    fn handle_event(&mut self, event: termion::event::Event) {
+        match event.clone() {
+            Event::Key(Key::Left) => self.cur_x -= 1,
+			Event::Key(Key::Right) => self.cur_x += 1,
+			Event::Key(Key::Up) => self.cur_y -= 1,
+			Event::Key(Key::Down) => self.cur_y += 1,
+			Event::Key(Key::Char('\n')) => {
+				self.fg = self.colours[((self.cur_y - 1) * 4 + (self.cur_x - 1)) as usize];
+			},
+			Event::Key(Key::Backspace) => {
+				self.bg = self.colours[((self.cur_y - 1) * 4 + (self.cur_x - 1)) as usize];
+			},
+			Event::Key(Key::Char('r')) => {
+				self.fg.default = !self.fg.default;
+			},
+            Event::Key(Key::Char('R')) => {
+				self.bg.default = !self.bg.default;
+			},
+            Event::Key(Key::Char('#')) => {
+                if self.inp_fg == 0 && self.inp_bg == 0 {
+                    self.inp_buffer = self.fg.to_html_string();
+                    self.inp_fg = 1;
+                }
+            },
+            Event::Key(Key::Char('~')) => {
+                if self.inp_fg == 0 && self.inp_bg == 0 {
+                    self.inp_buffer = self.bg.to_html_string();
+                    self.inp_bg = 1;
+                }
+            },
+            Event::Key(Key::Char(c)) => {
+                if c.is_digit(16) {
+                    if self.inp_fg != 0 || self.inp_bg != 0 {
+                        //fucking stupid hack to get around the
+                        //lack of ability to set a char in a string in rust
+                        let mut res = String::with_capacity(self.inp_buffer.len());
+                        let mut idx = 0;
+                        for ch in self.inp_buffer.chars() {
+                            //evil hack because one of these will (hopefully) always be zero
+                            if idx == (self.inp_fg + self.inp_bg) {
+                                res.push(c);
+                            } else {
+                                res.push(ch);
+                            }
+                            idx += 1;
+                        }
+                        self.inp_buffer = res;
+                    }
+                    if self.inp_fg != 0 {
+                        self.inp_fg += 1;
+                        if self.inp_fg > 6 {
+                            self.inp_fg = 0;
+                            self.fg = RGB::from_html(u32::from_str_radix(self.inp_buffer.trim_start_matches("#"), 16).unwrap());
+                        }
+                    }
+                    if self.inp_bg != 0 {
+                        self.inp_bg += 1;
+                        if self.inp_bg > 6 {
+                            self.inp_bg = 0;
+                            self.bg = RGB::from_html(u32::from_str_radix(self.inp_buffer.trim_start_matches("#"), 16).unwrap());
+                        }
+                    }
+                }
+            },
+			_ => ()
+		}
+		if self.cur_x < 1 { self.cur_x = 1; }
+		if self.cur_y < 1 { self.cur_y = 1; }
+		if self.cur_x > 4 { self.cur_x = 4; }
+		if self.cur_y > 4 { self.cur_y = 4; }
+	}
+}
+
+
+impl ImageView {
+    fn new() -> Self {
+    	let contents = std::fs::read_to_string("mem1.txt").unwrap();
+    	let data = parser::make_data(contents.chars().collect::<Vec<char>>());
+    	let width = data[0].len() as u16;
+    	let height = data.len() as u16;
+    	let curr_buffer = parser::construct_buffer(&data);
+    	ImageView {
+    	    data,
+    	    width,
+    	    height,
+    	    cur_x: 1,
+    	    cur_y: 1,
+    	    curr_buffer,
+    	    tool: Tool::None,
+    	    tool_down: false
+    	}
+    }
+    
+    fn handle_event(&mut self, event: termion::event::Event, colours: &mut ColoursView, pen_char: &mut char) {
+        match event.clone() {
+            Event::Key(Key::Left) => self.cur_x -= 1,
+			Event::Key(Key::Right) => self.cur_x += 1,
+			Event::Key(Key::Up) => self.cur_y -= 1,
+			Event::Key(Key::Down) => self.cur_y += 1,
+			Event::Key(Key::Char('\n')) => self.tool_down = !self.tool_down,
+		    _ => (),
+        }
+        if self.cur_x < 1 { self.cur_x = 1 }
+        if self.cur_y < 1 { self.cur_y = 1; }
+        if self.cur_x > self.width  { self.cur_x = self.width; }
+        if self.cur_y > self.height { self.cur_y = self.height; }
+
+        if !self.tool_down {
+           match event.clone() {
+   			    Event::Key(Key::Char('t')) => {
+       				self.tool = Tool::Text;
+       			}
+       			Event::Key(Key::Char('p')) => {
+                    self.tool = Tool::Pen;
+       			}
+       			Event::Key(Key::Char('o')) => {
+       			    self.tool = Tool::Paint;
+       			}
+       			Event::Key(Key::Char('g')) => {
+                    colours.fg = self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].fg;
+                    colours.bg = self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].bg;
+       			}
+                Event::Key(Key::Char('h')) => {
+                    colours.fg  = self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].fg;
+                    colours.bg  = self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].bg;
+                    *pen_char = self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].ch;
+       			}
+       			_ => (),
+   			}
+        }
+        if self.tool == Tool::Text && self.tool_down {
+            match event.clone() {
+                Event::Key(Key::Char('\n')) => (),
+			    Event::Key(Key::Char(c)) => {
+    				self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].ch = c;
+            		if !colours.fg.default {
+            	        self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].fg = colours.fg;
+            	    }
+            	    if !colours.bg.default {
+              		    self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].bg = colours.bg;
+              		}
+                	self.cur_x += 1;
+                	self.curr_buffer = parser::construct_buffer(&self.data);
+                }
+                _ => (),
+            }
+        } else if self.tool == Tool::Pen && self.tool_down {
+            if !colours.fg.default {
+                self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].fg = colours.fg;
+            }
+            if !colours.bg.default {
+                self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].bg = colours.bg;
+            }
+            self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].ch = *pen_char;
+            self.curr_buffer = parser::construct_buffer(&self.data);
+        } else if self.tool == Tool::Paint && self.tool_down {
+            if !colours.fg.default {
+                self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].fg = colours.fg;
+            }
+            if !colours.bg.default {
+    		    self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].bg = colours.bg;
+            }
+            self.curr_buffer = parser::construct_buffer(&self.data);
+        }
+    }
 }
 
 fn draw_colour_select(
@@ -214,23 +269,6 @@ fn draw_colour_select(
 	render
 }
 
-fn make_char_sheet(txt: String) -> Vec<Vec<char>> {
-	let mut ret: Vec<Vec<char>> = Vec::new();
-	let arr_1d: Vec<char> = txt.chars().collect::<Vec<char>>();
-	ret.push(Vec::new());
-	for ch in arr_1d {
-		if ch == '\n' {
-			ret.push(Vec::new());
-		} else {
-			ret.last_mut().unwrap().push(ch);
-		}
-	}
-	while ret.len() > 0 && ret.last().unwrap().len() == 0 {
-		ret.pop();
-	}
-	ret
-}
-
 fn draw_char_sheet(char_sheet: &Vec<Vec<char>>, width: u16) -> String {
     let mut x: u16 = 0;
     let mut y: u16 = 0;
@@ -253,46 +291,22 @@ fn main() {
 	let stdout         = stdout().into_raw_mode().unwrap();
 	let screen         = termion::screen::AlternateScreen::from(stdout).into_raw_mode().unwrap();
 	let mut screen     = termion::input::MouseTerminal::from(screen).into_raw_mode().unwrap();
-	let contents       = std::fs::read_to_string("mem1.txt").unwrap();
 	let char_sheet_txt = std::fs::read_to_string("character_sheet.txt").unwrap();
-	let char_sheet     = make_char_sheet(char_sheet_txt);
-	
-	let colours = [0xffffff, 0xffff01, 0xff6600, 0xde0000,
-			       0xff0198, 0x330099, 0x0001cd, 0x0098fe,
-				   0x01ab02, 0x016701, 0x673301, 0x9a6634,
-				   0xbbbbbb, 0x888888, 0x444444, 0x000000].iter().map(|x| RGB::from_html(*x)).collect::<Vec<RGB>>();
-
-	let mut data = make_data(contents.chars().collect::<Vec<char>>());
-	let width: u16 = data[0].len() as u16;
-	let height: u16 = data.len() as u16;
+	let char_sheet     = parser::make_char_sheet(char_sheet_txt);	
 	
     let stdin = stdin();
-
-    let mut img_cur_x: u16 = 3;
-    let mut img_cur_y: u16 = 2;
-
-	let mut tool_cur_x: u16 = 1;
-	let mut tool_cur_y: u16 = 1;
-
+	
 	let mut char_cur_x: u16 = 3;
 	let mut char_cur_y: u16 = 6;
     
-    let mut curr_fg = RGB::new(0, 0, 0);
-    let mut curr_bg = RGB::new(255, 255, 255);
-
-    let mut inp_fg = 0;
-    let mut inp_bg = 0;
-    let mut inp_buffer = "".to_string();
-    
 	write!(screen, "{}{}", termion::cursor::Hide, termion::clear::All).unwrap();
-
-	let mut curr_buffer: String = construct_buffer(&data);
 
     let mut pen_char: char = '█';
 
 	let mut focus = Focus::Image;
-	let mut tool = Tool::None;
-	let mut tool_down = false;
+
+	let mut image = ImageView::new();
+	let mut colours = ColoursView::new();
 
     for event in stdin.events() {
         let event = event.unwrap();
@@ -301,96 +315,31 @@ fn main() {
 			Event::Key(Key::Ctrl('q')) => break,
 			Event::Key(Key::Ctrl('s')) => {
 				let mut file = std::fs::File::create("mem1.txt").unwrap();
-				file.write_all(curr_buffer.replace("\r\n", "\n").as_bytes()).unwrap();
+				file.write_all(image.curr_buffer.replace("\r\n", "\n").as_bytes()).unwrap(); //TODO move to image struct
 			},
 			Event::Key(Key::Ctrl('e')) => {
-		    	if focus != Focus::Charsheet {
-		    		focus = Focus::Charsheet;
-		    	} else {
-		    		focus = Focus::Image; //TODO ??
+			    if !image.tool_down {
+    		    	if focus != Focus::Charsheet {
+    		    		focus = Focus::Charsheet;
+    		    	} else {
+    		    		focus = Focus::Image; //TODO ??
+    		    	}
 		    	}
 			},
 			Event::Key(Key::Char('\t')) => {
-			    if focus == Focus::Image {
-			        focus = Focus::Toolbox;
-			    } else if focus == Focus::Toolbox {
-			        focus = Focus::Image;
-			    }
+			    if !image.tool_down {
+                    if focus == Focus::Image {
+                        focus = Focus::Colours;
+                    } else if focus == Focus::Colours {
+                        focus = Focus::Image;
+                    }
+                }
 			},
 			_ => (),
 		}
 
-		if focus == Focus::Toolbox {
-			match event.clone() {
-				Event::Key(Key::Left) => tool_cur_x -= 1,
-    			Event::Key(Key::Right) => tool_cur_x += 1,
-    			Event::Key(Key::Up) => tool_cur_y -= 1,
-    			Event::Key(Key::Down) => tool_cur_y += 1,
-    			Event::Key(Key::Char('\n')) => {
-    				curr_fg = colours[((tool_cur_y - 1) * 4 + (tool_cur_x - 1)) as usize];
-    			},
-    			Event::Key(Key::Backspace) => {
-    				curr_bg = colours[((tool_cur_y - 1) * 4 + (tool_cur_x - 1)) as usize];
-    			},
-    			Event::Key(Key::Char('r')) => {
-    				curr_fg.default = !curr_fg.default;
-    			},
-				Event::Key(Key::Char('R')) => {
-    				curr_bg.default = !curr_bg.default;
-    			},
-                Event::Key(Key::Char('#')) => {
-                    if inp_fg == 0 && inp_bg == 0 {
-                        inp_buffer = curr_fg.to_html_string();
-                        inp_fg = 1;
-                    }
-                },
-                Event::Key(Key::Char('~')) => {
-                    if inp_fg == 0 && inp_bg == 0 {
-                        inp_buffer = curr_bg.to_html_string();
-                        inp_bg = 1;
-                    }
-                },
-                Event::Key(Key::Char(c)) => {
-                    if c.is_digit(16) {
-                        if inp_fg != 0 || inp_bg != 0 {
-                            //fucking stupid hack to get around the
-                            //lack of ability to set a char in a string in rust
-                            let mut res = String::with_capacity(inp_buffer.len());
-                            let mut idx = 0;
-                            for ch in inp_buffer.chars() {
-                                //evil hack because one of these will (hopefully) always be zero
-                                if idx == (inp_fg + inp_bg) {
-                                    res.push(c);
-                                } else {
-                                    res.push(ch);
-                                }
-                                idx += 1;
-                            }
-                            inp_buffer = res;
-                        }
-                        if inp_fg != 0 {
-                            inp_fg += 1;
-                            if inp_fg > 6 {
-                                inp_fg = 0;
-                                curr_fg = RGB::from_html(u32::from_str_radix(inp_buffer.trim_start_matches("#"), 16).unwrap());
-                            }
-                        }
-                        if inp_bg != 0 {
-                            inp_bg += 1;
-                            if inp_bg > 6 {
-                                inp_bg = 0;
-                                curr_bg = RGB::from_html(u32::from_str_radix(inp_buffer.trim_start_matches("#"), 16).unwrap());
-                            }
-                        }
-                    }
-                },
-    			_ => ()
-			}
-			if tool_cur_x < 1 { tool_cur_x = 1; }
-			if tool_cur_y < 1 { tool_cur_y = 1; }
-			if tool_cur_x > 4  { tool_cur_x = 4; }
-			if tool_cur_y > 4 { tool_cur_y = 4; }
-			
+		if focus == Focus::Colours {
+		    colours.handle_event(event.clone());
 		}
 
 		if focus == Focus::Charsheet {
@@ -409,117 +358,48 @@ fn main() {
 		}
 
         if focus == Focus::Image {
-            match event.clone() {
-                Event::Key(Key::Left) => img_cur_x -= 1,
-    			Event::Key(Key::Right) => img_cur_x += 1,
-    			Event::Key(Key::Up) => img_cur_y -= 1,
-    			Event::Key(Key::Down) => img_cur_y += 1,
-    			Event::Key(Key::Char('\n')) => tool_down = !tool_down,
-    		    _ => (),
-			}
-			if img_cur_x < 1 { img_cur_x = 1; }
-			if img_cur_y < 1 { img_cur_y = 1; }
-			if img_cur_x > width  { img_cur_x = width; }
-			if img_cur_y > height { img_cur_y = height; }
-
-			if !tool_down {
-			    match event.clone() {
-       			    Event::Key(Key::Char('t')) => {
-           				tool = Tool::Text;
-           			}
-           			Event::Key(Key::Char('p')) => {
-                        tool = Tool::Pen;
-           			}
-           			Event::Key(Key::Char('o')) => {
-           			    tool = Tool::Paint;
-           			}
-           			Event::Key(Key::Char('g')) => {
-                        curr_fg = data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].fg;
-                        curr_bg = data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].bg;
-           			}
-                    Event::Key(Key::Char('h')) => {
-                        curr_fg  = data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].fg;
-                        curr_bg  = data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].bg;
-                        pen_char = data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].ch;
-           			}
-           			_ => (),
-       			}
-			}
-			if tool == Tool::Text && tool_down {
-			    match event.clone() {
-			    	Event::Key(Key::Char('\n')) => (),
-    			    Event::Key(Key::Char(c)) => {
-        				data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].ch = c;
-						if !curr_fg.default {
-					        data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].fg = curr_fg;
-					    }
-					    if !curr_bg.default {
-		    		        data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].bg = curr_bg;
-		    		    }
-        				img_cur_x += 1;
-        				curr_buffer = construct_buffer(&data);
-        			}
-        			_ => (),
-    			}
-			} else if tool == Tool::Pen && tool_down {
-			    if !curr_fg.default {
-			        data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].fg = curr_fg;
-			    }
-			    if !curr_bg.default {
-    		        data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].bg = curr_bg;
-    		    }
-    		    data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].ch = pen_char;
-    		    curr_buffer = construct_buffer(&data);
-			} else if tool == Tool::Paint && tool_down {
-				if !curr_fg.default {
-			        data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].fg = curr_fg;
-			    }
-			    if !curr_bg.default {
-    		        data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].bg = curr_bg;
-    		    }
-    		    curr_buffer = construct_buffer(&data);
-			}
+            image.handle_event(event.clone(), &mut colours, &mut pen_char);
         }
 		let cur_fg: termion::color::Fg<termion::color::Rgb>;
 		let cur_bg: termion::color::Bg<termion::color::Rgb>;
-		if (tool == Tool::Paint || tool == Tool::Pen) && tool_down {
-			cur_bg = curr_bg.to_bg();
-			cur_fg = curr_fg.to_fg();
+		if (image.tool == Tool::Paint || image.tool == Tool::Pen) && image.tool_down {
+			cur_bg = colours.bg.to_bg();
+			cur_fg = colours.fg.to_fg();
 		} else {
 			cur_bg = termion::color::Bg(termion::color::Rgb(0, 0, 0));
 			cur_fg = termion::color::Fg(termion::color::Rgb(255, 255, 255));
 		}
         let fg_string: String;
         let bg_string: String;
-        if inp_fg != 0 { fg_string = inp_buffer.clone();
-        } else { fg_string = curr_fg.to_html_string(); }
-        if inp_bg != 0 { bg_string = inp_buffer.clone();
-        } else { bg_string = curr_bg.to_html_string(); }
+        if colours.inp_fg != 0 { fg_string = colours.inp_buffer.clone();
+        } else { fg_string = colours.fg.to_html_string(); }
+        if colours.inp_bg != 0 { bg_string = colours.inp_buffer.clone();
+        } else { bg_string = colours.bg.to_html_string(); }
         
-        let colour_select  = draw_colour_select(width + 1, 3, tool_cur_x, tool_cur_y, &colours, curr_fg, curr_bg, &fg_string, &bg_string);
-        let chsheet_render = draw_char_sheet(&char_sheet, width);
+        let colour_select  = draw_colour_select(image.width + 1, 3, colours.cur_x, colours.cur_y, &colours.colours, colours.fg, colours.bg, &fg_string, &bg_string);
+        let chsheet_render = draw_char_sheet(&char_sheet, image.width);
 
 		write!(screen, "{}{}{}{}{}{}{}{}{}{}{}{}{:?}{}{}{}{}╭─╮{}│{}│{}╰─╯",
 			termion::color::Bg(termion::color::Reset),
 			termion::clear::All,
 		    colour_select,
 			termion::cursor::Goto(1, 1),
-			curr_buffer,
-			termion::cursor::Goto(img_cur_x, img_cur_y),
+			image.curr_buffer,
+			termion::cursor::Goto(image.cur_x, image.cur_y),
 			cur_fg,
 			cur_bg,
-			data[(img_cur_y - 1) as usize][(img_cur_x - 1) as usize].ch,
-			termion::cursor::Goto(img_cur_x, img_cur_y),
+			image.data[(image.cur_y - 1) as usize][(image.cur_x - 1) as usize].ch,
+			termion::cursor::Goto(image.cur_x, image.cur_y),
         	termion::color::Bg(termion::color::Reset),
-            termion::cursor::Goto(width + 1, 1),
-            tool,
-            termion::cursor::Goto(width + 1, 2),
-            tool_down,
+            termion::cursor::Goto(image.width + 1, 1),
+            image.tool,
+            termion::cursor::Goto(image.width + 1, 2),
+            image.tool_down,
 		    chsheet_render,
-			termion::cursor::Goto(width + 9 + (char_cur_x - 1) * 2 - 1, 2 + (char_cur_y - 1) * 2 - 1),
-			termion::cursor::Goto(width + 9 + (char_cur_x - 1) * 2 - 1, 2 + (char_cur_y - 1) * 2),
-			termion::cursor::Goto(width + 9 + (char_cur_x - 1) * 2 + 1, 2 + (char_cur_y - 1) * 2),
-			termion::cursor::Goto(width + 9 + (char_cur_x - 1) * 2 - 1, 2 + (char_cur_y - 1) * 2 + 1),
+			termion::cursor::Goto(image.width + 9 + (char_cur_x - 1) * 2 - 1, 2 + (char_cur_y - 1) * 2 - 1),
+			termion::cursor::Goto(image.width + 9 + (char_cur_x - 1) * 2 - 1, 2 + (char_cur_y - 1) * 2),
+			termion::cursor::Goto(image.width + 9 + (char_cur_x - 1) * 2 + 1, 2 + (char_cur_y - 1) * 2),
+			termion::cursor::Goto(image.width + 9 + (char_cur_x - 1) * 2 - 1, 2 + (char_cur_y - 1) * 2 + 1),
 		).unwrap();
 		
 		screen.flush().unwrap();

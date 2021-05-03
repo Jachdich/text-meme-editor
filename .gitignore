@@ -1,1 +1,7 @@
 target
+log.txt
+mnt
+*.png
+*.jpeg
+*.jpg
+00**
