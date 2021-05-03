@@ -49,6 +49,63 @@ struct ColoursView {
     colours: Vec<RGB>,
 }
 
+struct CharView {
+	char_sheet: Vec<Vec<char>>,
+	cur_x: u16,
+	cur_y: u16,
+    pen_char: char,
+}
+
+impl CharView {
+    fn new() -> Self {
+        let char_sheet_txt = std::fs::read_to_string("character_sheet.txt").unwrap();
+    	let char_sheet     = parser::make_char_sheet(char_sheet_txt);
+        CharView {
+            char_sheet,
+            cur_x: 1,
+            cur_y: 1,
+            pen_char: ' ',
+        }
+    }
+    fn handle_event(&mut self, event: termion::event::Event) {
+        match event.clone() {
+            Event::Key(Key::Left)  => self.cur_x -= 1,
+			Event::Key(Key::Right) => self.cur_x += 1,
+			Event::Key(Key::Up)    => self.cur_y -= 1,
+			Event::Key(Key::Down)  => self.cur_y += 1,
+			_ => (),
+        }
+        if self.cur_x < 1 { self.cur_x = 1; }
+        if self.cur_y < 1 { self.cur_y = 1; }
+        if self.cur_x > self.char_sheet[0].len() as u16 { self.cur_x = self.char_sheet[0].len() as u16; }
+        if self.cur_y > self.char_sheet.len() as u16 { self.cur_y = self.char_sheet.len() as u16; }
+        self.pen_char = self.char_sheet[self.cur_y as usize - 1][self.cur_x as usize - 1];
+    }
+    
+    fn draw(&self, ax: u16, ay: u16) -> String {
+        let mut x: u16 = 0;
+        let mut y: u16 = 0;
+        let mut chsheet_render = format!("{}{}",
+            termion::color::Fg(termion::color::Reset),
+            termion::color::Bg(termion::color::Reset));
+        for line in &self.char_sheet {
+            for ch in line {
+                chsheet_render.push_str(&format!("{}{}",
+                	termion::cursor::Goto(ax + x, ay + y), ch));
+                x += 2;
+            }
+            y += 2;
+            x = 0;
+        }
+        chsheet_render.push_str(&format!("{}╭─╮{}│{}│{}╰─╯",
+        	termion::cursor::Goto(ax + (self.cur_x - 1) * 2 - 1, ay + (self.cur_y - 1) * 2 - 1),
+			termion::cursor::Goto(ax + (self.cur_x - 1) * 2 - 1, ay + (self.cur_y - 1) * 2),
+			termion::cursor::Goto(ax + (self.cur_x - 1) * 2 + 1, ay + (self.cur_y - 1) * 2),
+			termion::cursor::Goto(ax + (self.cur_x - 1) * 2 - 1, ay + (self.cur_y - 1) * 2 + 1)));
+        chsheet_render
+    }
+}
+
 impl ColoursView {
     fn new() -> Self {
         let colours = [0xffffff, 0xffff01, 0xff6600, 0xde0000,
@@ -66,6 +123,7 @@ impl ColoursView {
             colours
         }
     }
+    
     fn handle_event(&mut self, event: termion::event::Event) {
         match event.clone() {
             Event::Key(Key::Left) => self.cur_x -= 1,
@@ -137,6 +195,43 @@ impl ColoursView {
 		if self.cur_x > 4 { self.cur_x = 4; }
 		if self.cur_y > 4 { self.cur_y = 4; }
 	}
+	
+	fn draw(&self, x: u16, y: u16) -> String {
+	    let fg_string: String;
+	    let bg_string: String;
+	    if self.inp_fg != 0 { fg_string = self.inp_buffer.clone();
+	    } else { fg_string = self.fg.to_html_string(); }
+	    if self.inp_bg != 0 { bg_string = self.inp_buffer.clone();
+	    } else { bg_string = self.bg.to_html_string(); }
+	    
+		let mut render = "".to_string();
+	    for row in 0..4 as usize {
+	       	render.push_str(&format!("{}{}{}█{}█{}█{}█", 
+				termion::cursor::Goto(x, row as u16 + y),
+				termion::color::Bg(termion::color::Reset),
+				self.colours[row * 4 + 0].to_fg(),
+				self.colours[row * 4 + 1].to_fg(),
+				self.colours[row * 4 + 2].to_fg(),
+				self.colours[row * 4 + 3].to_fg(),
+	       	));
+	    }
+	
+		let sel = self.colours[((self.cur_y - 1) * 4 + (self.cur_x - 1)) as usize];
+		render.push_str(&format!("{}{}{}╳{}{}{}{}{}{}{}{}",
+	    	termion::cursor::Goto((self.cur_x - 1) + x, (self.cur_y - 1) + y),
+	        sel.get_inverted().to_fg(),
+	        sel.to_bg(),
+			termion::cursor::Goto(x, y + 4),
+			self.fg.to_bg(),
+			self.fg.get_inverted().to_fg(),
+			fg_string,
+			termion::cursor::Goto(x, y + 5),
+			self.bg.to_bg(),
+			self.bg.get_inverted().to_fg(),
+			bg_string,
+		));
+		render
+	}
 }
 
 
@@ -159,7 +254,7 @@ impl ImageView {
     	}
     }
     
-    fn handle_event(&mut self, event: termion::event::Event, colours: &mut ColoursView, pen_char: &mut char) {
+    fn handle_event(&mut self, event: termion::event::Event, colours: &mut ColoursView, chars: &mut CharView) {
         match event.clone() {
             Event::Key(Key::Left) => self.cur_x -= 1,
 			Event::Key(Key::Right) => self.cur_x += 1,
@@ -191,7 +286,7 @@ impl ImageView {
                 Event::Key(Key::Char('h')) => {
                     colours.fg  = self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].fg;
                     colours.bg  = self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].bg;
-                    *pen_char = self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].ch;
+                    chars.pen_char = self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].ch;
        			}
        			_ => (),
    			}
@@ -219,7 +314,7 @@ impl ImageView {
             if !colours.bg.default {
                 self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].bg = colours.bg;
             }
-            self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].ch = *pen_char;
+            self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].ch = chars.pen_char;
             self.curr_buffer = parser::construct_buffer(&self.data);
         } else if self.tool == Tool::Paint && self.tool_down {
             if !colours.fg.default {
@@ -233,80 +328,20 @@ impl ImageView {
     }
 }
 
-fn draw_colour_select(
-		x: u16, y: u16,
-		tool_cur_x: u16, tool_cur_y: u16,
-		colours: &Vec<RGB>, 
-		curr_fg: RGB, curr_bg: RGB,
-		fg_string: &str, bg_string: &str) -> String {
-
-	let mut render = "".to_string();
-    for row in 0..4 as usize {
-       	render.push_str(&format!("{}{}{}█{}█{}█{}█", 
-			termion::cursor::Goto(x, row as u16 + y),
-			termion::color::Bg(termion::color::Reset),
-			colours[row * 4 + 0].to_fg(),
-			colours[row * 4 + 1].to_fg(),
-			colours[row * 4 + 2].to_fg(),
-			colours[row * 4 + 3].to_fg(),
-       	));
-    }
-
-	let sel = colours[((tool_cur_y - 1) * 4 + (tool_cur_x - 1)) as usize];
-	render.push_str(&format!("{}{}{}╳{}{}{}{}{}{}{}{}",
-    	termion::cursor::Goto((tool_cur_x - 1) + x, (tool_cur_y - 1) + y),
-        sel.get_inverted().to_fg(),
-        sel.to_bg(),
-		termion::cursor::Goto(x, y + 4),
-		curr_fg.to_bg(),
-		curr_fg.get_inverted().to_fg(),
-		fg_string,
-		termion::cursor::Goto(x, y + 5),
-		curr_bg.to_bg(),
-		curr_bg.get_inverted().to_fg(),
-		bg_string,
-	));
-	render
-}
-
-fn draw_char_sheet(char_sheet: &Vec<Vec<char>>, width: u16) -> String {
-    let mut x: u16 = 0;
-    let mut y: u16 = 0;
-    let mut chsheet_render = format!("{}{}",
-        termion::color::Fg(termion::color::Reset),
-        termion::color::Bg(termion::color::Reset));
-    for line in char_sheet {
-        for ch in line {
-            chsheet_render.push_str(&format!("{}{}",
-            	termion::cursor::Goto(width + 9 + x, y + 2), ch));
-            x += 2;
-        }
-        y += 2;
-        x = 0;
-    }
-    chsheet_render
-}
-
 fn main() {
-	let stdout         = stdout().into_raw_mode().unwrap();
-	let screen         = termion::screen::AlternateScreen::from(stdout).into_raw_mode().unwrap();
-	let mut screen     = termion::input::MouseTerminal::from(screen).into_raw_mode().unwrap();
-	let char_sheet_txt = std::fs::read_to_string("character_sheet.txt").unwrap();
-	let char_sheet     = parser::make_char_sheet(char_sheet_txt);	
+	let stdout     = stdout().into_raw_mode().unwrap();
+	let screen     = termion::screen::AlternateScreen::from(stdout).into_raw_mode().unwrap();
+	let mut screen = termion::input::MouseTerminal::from(screen).into_raw_mode().unwrap();
 	
     let stdin = stdin();
-	
-	let mut char_cur_x: u16 = 3;
-	let mut char_cur_y: u16 = 6;
-    
-	write!(screen, "{}{}", termion::cursor::Hide, termion::clear::All).unwrap();
 
-    let mut pen_char: char = '█';
+	write!(screen, "{}{}", termion::cursor::Hide, termion::clear::All).unwrap();
 
 	let mut focus = Focus::Image;
 
-	let mut image = ImageView::new();
+	let mut image   = ImageView::new();
 	let mut colours = ColoursView::new();
+	let mut chars   = CharView::new();
 
     for event in stdin.events() {
         let event = event.unwrap();
@@ -343,22 +378,11 @@ fn main() {
 		}
 
 		if focus == Focus::Charsheet {
-			match event.clone() {
-				Event::Key(Key::Left) => char_cur_x -= 1,
-    			Event::Key(Key::Right) => char_cur_x += 1,
-    			Event::Key(Key::Up) => char_cur_y -= 1,
-    			Event::Key(Key::Down) => char_cur_y += 1,
-    			_ => (),
-			}
-			if char_cur_x < 1 { char_cur_x = 1; }
-			if char_cur_y < 1 { char_cur_y = 1; }
-			if char_cur_x > char_sheet[0].len() as u16 { char_cur_x = char_sheet[0].len() as u16; }
-			if char_cur_y > char_sheet.len() as u16 { char_cur_y = char_sheet.len() as u16; }
-			pen_char = char_sheet[char_cur_y as usize - 1][char_cur_x as usize - 1];
+			chars.handle_event(event.clone());
 		}
 
         if focus == Focus::Image {
-            image.handle_event(event.clone(), &mut colours, &mut pen_char);
+            image.handle_event(event.clone(), &mut colours, &mut chars);
         }
 		let cur_fg: termion::color::Fg<termion::color::Rgb>;
 		let cur_bg: termion::color::Bg<termion::color::Rgb>;
@@ -369,17 +393,11 @@ fn main() {
 			cur_bg = termion::color::Bg(termion::color::Rgb(0, 0, 0));
 			cur_fg = termion::color::Fg(termion::color::Rgb(255, 255, 255));
 		}
-        let fg_string: String;
-        let bg_string: String;
-        if colours.inp_fg != 0 { fg_string = colours.inp_buffer.clone();
-        } else { fg_string = colours.fg.to_html_string(); }
-        if colours.inp_bg != 0 { bg_string = colours.inp_buffer.clone();
-        } else { bg_string = colours.bg.to_html_string(); }
         
-        let colour_select  = draw_colour_select(image.width + 1, 3, colours.cur_x, colours.cur_y, &colours.colours, colours.fg, colours.bg, &fg_string, &bg_string);
-        let chsheet_render = draw_char_sheet(&char_sheet, image.width);
+        let colour_select  = colours.draw(image.width + 1, 3);
+        let chsheet_render = chars.draw(image.width + 9, 3);
 
-		write!(screen, "{}{}{}{}{}{}{}{}{}{}{}{}{:?}{}{}{}{}╭─╮{}│{}│{}╰─╯",
+		write!(screen, "{}{}{}{}{}{}{}{}{}{}{}{}{:?}{}{}{}",
 			termion::color::Bg(termion::color::Reset),
 			termion::clear::All,
 		    colour_select,
@@ -396,10 +414,6 @@ fn main() {
             termion::cursor::Goto(image.width + 1, 2),
             image.tool_down,
 		    chsheet_render,
-			termion::cursor::Goto(image.width + 9 + (char_cur_x - 1) * 2 - 1, 2 + (char_cur_y - 1) * 2 - 1),
-			termion::cursor::Goto(image.width + 9 + (char_cur_x - 1) * 2 - 1, 2 + (char_cur_y - 1) * 2),
-			termion::cursor::Goto(image.width + 9 + (char_cur_x - 1) * 2 + 1, 2 + (char_cur_y - 1) * 2),
-			termion::cursor::Goto(image.width + 9 + (char_cur_x - 1) * 2 - 1, 2 + (char_cur_y - 1) * 2 + 1),
 		).unwrap();
 		
 		screen.flush().unwrap();
