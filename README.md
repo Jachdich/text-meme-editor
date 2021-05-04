@@ -16,6 +16,7 @@ Use [tiv](https://github.com/stefanhaustein/TerminalImageViewer) to convert a me
     - p to switch to pen tool (draws with selected character)
     - o to switch to paint tool (changes colour of chars)
     - t to switch to text tool (type characters directly)
+    - f to switch to flood fill tool (changes colour of similarly coloured regions)
     - g to set the current foreground and background colour to the colour of the currently selected character
     - h to set colours like g and also set the pen char to the currently selected character
     - enter to toggle pen down
