@@ -24,7 +24,8 @@ enum Tool {
     None,
     Pen,
     Paint,
-    Text
+    Text,
+    Fill,
 }
 
 struct ImageView {
@@ -280,51 +281,84 @@ impl ImageView {
        			    self.tool = Tool::Paint;
        			}
        			Event::Key(Key::Char('g')) => {
-                    colours.fg = self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].fg;
-                    colours.bg = self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].bg;
+                    colours.fg = self.current_cell().fg;
+                    colours.bg = self.current_cell().bg;
        			}
                 Event::Key(Key::Char('h')) => {
-                    colours.fg  = self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].fg;
-                    colours.bg  = self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].bg;
-                    chars.pen_char = self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].ch;
+                    let cell = self.current_cell();
+                    colours.fg = cell.fg;
+                    colours.bg = cell.bg;
+                    chars.pen_char = cell.ch;
+       			}
+       			Event::Key(Key::Char('f')) => {
+       			    self.tool = Tool::Fill;
        			}
        			_ => (),
    			}
         }
+        
         if self.tool == Tool::Text && self.tool_down {
             match event.clone() {
                 Event::Key(Key::Char('\n')) => (),
+                Event::Key(Key::Char('\t')) => (),
 			    Event::Key(Key::Char(c)) => {
-    				self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].ch = c;
-            		if !colours.fg.default {
-            	        self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].fg = colours.fg;
-            	    }
-            	    if !colours.bg.default {
-              		    self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].bg = colours.bg;
-              		}
+    				self.current_cell_mut().ch = c;
+            		self.set_colours(colours);
                 	self.cur_x += 1;
                 	self.curr_buffer = parser::construct_buffer(&self.data);
                 }
                 _ => (),
             }
         } else if self.tool == Tool::Pen && self.tool_down {
-            if !colours.fg.default {
-                self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].fg = colours.fg;
-            }
-            if !colours.bg.default {
-                self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].bg = colours.bg;
-            }
-            self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].ch = chars.pen_char;
+            self.set_colours(colours);
+            self.current_cell_mut().ch = chars.pen_char;
             self.curr_buffer = parser::construct_buffer(&self.data);
         } else if self.tool == Tool::Paint && self.tool_down {
-            if !colours.fg.default {
-                self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].fg = colours.fg;
-            }
-            if !colours.bg.default {
-    		    self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize].bg = colours.bg;
-            }
+            self.set_colours(colours);
             self.curr_buffer = parser::construct_buffer(&self.data);
+        } else if self.tool == Tool::Fill && self.tool_down {
+            self.tool_down = false;
+            if self.current_cell().fg != colours.fg || self.current_cell().bg != colours.bg {
+                self.recursive_fill(self.cur_x as usize - 1, self.cur_y as usize - 1, colours.fg, colours.bg);
+                self.curr_buffer = parser::construct_buffer(&self.data);
+            }
         }
+    }
+
+    fn recursive_fill(&mut self, x: usize, y: usize, fg: RGB, bg: RGB) {
+        let orig_fg = self.data[y][x].fg;
+        let orig_bg = self.data[y][x].bg;
+        if !fg.default { self.data[y][x].fg = fg; }
+        if !bg.default { self.data[y][x].bg = bg; }
+        for coord in [[1, 0], [-1, 0], [0, 1], [0, -1]].iter() {
+            if  x as isize + coord[0] < 1 ||
+                x as isize + coord[0] > self.width as isize ||
+                y as isize + coord[1] < 1 ||
+                y as isize + coord[1] > self.height as isize {
+                continue;
+            }
+            let ch = self.data[(y as isize + coord[1]) as usize][(x as isize + coord[0]) as usize];
+            if ch.fg == orig_fg && ch.bg == orig_bg {
+                self.recursive_fill((x as isize + coord[0]) as usize, (y as isize + coord[1]) as usize, fg, bg);
+            }
+        }
+
+    }
+
+    fn set_colours(&mut self, colours: &ColoursView) {
+        if !colours.fg.default {
+            self.current_cell_mut().fg = colours.fg;
+        }
+        if !colours.bg.default {
+		    self.current_cell_mut().bg = colours.bg;
+        }
+    }
+    
+    fn current_cell(&self) -> &FmtChar {
+        &self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize]
+    }
+    fn current_cell_mut(&mut self) -> &mut FmtChar {
+        &mut self.data[(self.cur_y - 1) as usize][(self.cur_x - 1) as usize]
     }
 }
 
@@ -334,7 +368,6 @@ fn main() {
 	let mut screen = termion::input::MouseTerminal::from(screen).into_raw_mode().unwrap();
 	
     let stdin = stdin();
-
 	write!(screen, "{}{}", termion::cursor::Hide, termion::clear::All).unwrap();
 
 	let mut focus = Focus::Image;
@@ -376,14 +409,13 @@ fn main() {
 		if focus == Focus::Colours {
 		    colours.handle_event(event.clone());
 		}
-
 		if focus == Focus::Charsheet {
 			chars.handle_event(event.clone());
 		}
-
         if focus == Focus::Image {
             image.handle_event(event.clone(), &mut colours, &mut chars);
         }
+        
 		let cur_fg: termion::color::Fg<termion::color::Rgb>;
 		let cur_bg: termion::color::Bg<termion::color::Rgb>;
 		if (image.tool == Tool::Paint || image.tool == Tool::Pen) && image.tool_down {
